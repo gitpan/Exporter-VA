@@ -45,5 +45,5 @@ sub figure_it_out
     }
  }
 
-print "module M1 loaded\n";
+print "module M1 loaded\n"  unless $main::quiet;
 1;

@@ -1,5 +1,20 @@
 use strict;
 use warnings;
+use Getopt::Long;
+use File::Spec;
+
+our $quiet;
+my $failcount;
+
+BEGIN {
+   GetOptions ('quiet' => \$quiet) or die "bad options\n";
+   if ($quiet) {
+      # also silence the --verbose and --dump stuff
+      open (my $f, '>', File::Spec->devnull());
+      require Exporter::VA;
+      *Exporter::VA::VERBOSE= $f;
+      }
+   }
 
 sub verify
  {
@@ -10,10 +25,11 @@ sub verify
     }
  else {
     if ($result eq $answer) {
-       print "OK calling { $code } => $result\n";
+       print "OK calling { $code } => $result\n"  unless $quiet;
        }
     else {
        print "WRONG calling { $code }, returns \"$result\",  expected \"$answer\"\n";
+       ++$failcount;
        }
     }
  }
@@ -69,5 +85,35 @@ verify "C5::foo (23)", "Called M3::middle_foo (23).";
 
 
 ## Make sure we use a :DEFAULT.
-## >>
+package C6;
+use M2;
+sub verify;
+*verify= \&main::verify;
+verify "C6::foo (24)", "Called M2::foo (24).";
+verify "C6::thud (25)", "Called M2::baz (25).";
+
+
+## Pragma names may be non-identifiers
+# (also tests pragma extracting arguments)
+# (also tests that return value from callback is ignored if symbol begins with dash)
+package C7;
+our $output;
+use M2 'foo', '-pra#ma!', \$output, 'baz';
+sub verify;
+*verify= \&main::verify;
+verify "C7::foo (26)", "Called M2::foo (26).";
+verify "C7::baz (27)", "Called M2::baz (27).";
+verify "\$C7::output",  "-pra#ma!";
+
+
+####### summary report ######
+print '-'x40, "\n"  unless $quiet;
+if ($failcount) {
+   print "* FAILED $failcount tests!!\n";
+   exit 5;
+   }
+else {
+   print "PASSED all tests.\n";
+   exit 0;
+   }
 

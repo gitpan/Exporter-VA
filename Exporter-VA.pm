@@ -10,7 +10,7 @@ package Exporter::VA;
 use strict;
 use warnings;
 use Carp qw/croak confess/;
-our $VERSION= v1.2;  # major.minor.update.docsonly
+our $VERSION= v1.2.2;  # major.minor.update.docsonly
 *VERBOSE= *STDERR{IO};   # can be redirected
 
 my %EXPORT= (
@@ -318,9 +318,11 @@ sub _populate_defaults
  while (my ($key,$value)= each %defaults) {
     $$self{$key}= $value  unless exists $$self{$key};
     }
+ no strict 'refs';
+ $$self{'.default_VERSION'}= normalize_vstring (${"$self->{'..home'}::VERSION"})  unless exists $$self{'.default_VERSION'};
  }
 
-}
+} # end scope for populate_defaults
 
 
 sub _expand_plain
@@ -416,6 +418,17 @@ sub export_VERSION
  }
 
 }
+
+
+## pre-made callbacks
+
+sub export_fail
+ {
+ my ($self, $caller, $version, $symbol, $param_list_tail)= @_;
+ Err "May not import $symbol";  # that's what it would do anyway, if it were not listed.
+ # Not terribly useful, but here for com
+ }
+
 
 ## main code.
 {
@@ -572,9 +585,9 @@ they have different purposes and different usage rules.
 
 =item symbols
 
-If the hash key begins with a Perl sigel, left-angle (a pseudo-sigel for file handles) or a Perl 
+If the hash key begins with a Perl sigil, left-angle (a pseudo-sigel for file handles) or a Perl 
 identifier character (to be exact, C<< /^[$@%*&\w<] >>)
-it names a symbol that the module's user may import by that name.  If there is no sigel, then it
+it names a symbol that the module's user may import by that name.  If there is no sigil, then it
 assumes a C<&>, so you can say C<foo> instead of C<&foo>.
 
 =item tags
@@ -1026,6 +1039,9 @@ to declare your additional options.
 
 =head2 Quick guide to difference compared to classic Exporter
 
+Also see the Exporter-VA-Convert.perl program, which will automatically read a module and tell you
+exactly what to change and show you the equivilent C<%EXPORT> definition.
+
 With classic Exporter,
 
 	package SomeModule;
@@ -1345,6 +1361,8 @@ See L<.verbose|the .verbose setting>.  This increments the C<.verbose> value.
 
 =head1 Compatibility
 
+=head2 Platforms
+
 Developed originally on Perl 5.6.1, ActiveState build 630 for Windows.  It uses only pure Perl and no
 non-basic modules, so it ought to work on any platform.  It uses nothing that should be changed in
 Perl 5.8.
@@ -1356,6 +1374,27 @@ script works properly and that there are no issues.  If there are issues, I'm ev
 	Exporter::VA version 1.1 on Perl 5.6.1 (AS 630, Windows 2000)
 	... others wanted!
 
+=head2 Unicode / utf8
+
+In Perl 5.6, a compiled regex only works properly with strings of the same discipline (byte-oriented or
+character oriented).  So, how should this module be compiled, with or without Unicode
+regex's?  Since the strings being matched will be Perl identifier names, and non-ASCII identifiers
+are only allowed when C<use utf8> is in effect, that is the natural choice.  Without utf8 mode, you
+have no business importing a symbol that contains a Unicode name, anyway.  Note that if you do pass
+byte-oriented strings to the C<import()> function that contain values >127, you'll get warnings about
+bad UTF-8 encoding from the module.  Don't do that.  You have no business using such characters in
+identifier names, and you'll have to work-around that for pragmatic import names beginning with a
+dash (which don't have to be legal identifiers).  The regex issue is fixed in Perl 5.8, so it is no longer
+a problem moving forward.
+
+=head2 Threads
+
+The Exporter::VA module is oblivious to threads.  Modules are normally imported at the beginning
+of execution before threads are started, so there is not much incentive to verify the matter.  But if
+you do call C<import()> for the same module from two different threads, the C<%EXPORT> definition
+should be copied to each thread.  As of writing, I'm unaware of how symbol tables are shared (or not).
+Anyone who explores the matter or stresses the module in this regard, please let me know.
+
 =head1 Caveats and known issues
 
 The version-number handling is still primitive.  You must use a v-string (not a float) for the
@@ -1365,13 +1404,7 @@ C<our $VERSION= "1.0.2";> does not (yet).  Versions are compared without normali
 v1.2.3.0 will compare greater than (not equal to) v.1.2.3.  This will be fixed soon.
 
 Warning on directly importing something that begins with an underscore - probably not
-implemented.
-
-Implicit use of :DEFAULT not in test suite, but appears to be implemented.
-
--pragma names that are not legal symbol names (other than the dash) is not in the test suite.
-
-Throwing away any return value from a -pragma is not in the test suite.
+implemented.  Not unit testing the presence of documented warnings, anyway.
 
 .allowed_VERSIONS option not implemented.
 
@@ -1386,8 +1419,6 @@ AUTOLOAD thunks and autoload_import for versioned imports not implemented yet.
 client_desired_version() public method not implemented yet.
 
 -derived pragma not implemented yet.
-
--def pragma
 
 =head1 HISTORY
 
@@ -1408,4 +1439,14 @@ Implement version-list in tag list.
 December 23, 2002 - review docs, produce 'issues' list, make install.perl.
 
 v1.2 released.  Supports everything except non-imported alias suite of features.
+
+January 6, 2003 - Exporter-VA-Convert.perl utility, release procedure.
+
+January 9, 2003 - 
+	if .default_VERSION left out, assumes current $VERSION.
+	installer runs unit tests, rolls back on failure.
+	test1.perl has --quiet mode.
+	put in more unit testing code.
+
+v1.2.2 released.
 

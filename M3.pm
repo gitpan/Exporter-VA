@@ -4,7 +4,7 @@ use warnings;
 package M3;
 
 use Exporter::VA ':normal',
- {
+ -def => {
  foo => [v1.0, \\&old_foo, v1.5, \\&middle_foo, v2.0, \\&new_foo],
  ':tag' => ['foo'],
  '.plain' => [qw/:tag bar/],
@@ -36,7 +36,7 @@ sub bar
  return "Called " . __PACKAGE__ . "::bar (@_).";
  }
 
-print "module M3 loaded\n";
+print "module M3 loaded\n"  unless $main::quiet;
 1;
 
 

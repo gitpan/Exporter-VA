@@ -8,11 +8,13 @@ use Exporter::VA ':normal',
  {
  '.plain' => [ qw/ foo &baz $ztesch :tag1/],
  ':tag1' => [ qw/ quux bazola thud &grunt/],
+ ':DEFAULT' => [qw/ foo thud/],
  '&bazola' => \\&baz,
  'thud' => \\&baz,
  'grunt' => \\&baz,
- '.&begin' => sub { print "called .&begin\n"; },
- '.&end' => sub { print "called .&end\n"; },
+ '.&begin' => sub { print "called .&begin\n"  unless $main::quiet; },
+ '.&end' => sub { print "called .&end\n"  unless $main::quiet; },
+ '-pra#ma!' => sub { my ($self, $caller, $version, $symbol, $param_list_tail)= @_;  my $dest= shift @$param_list_tail;  $$dest= $symbol;  return "who knows what evil lurks in the hearts of men?" },
  } ;
 
 sub foo
@@ -35,6 +37,6 @@ sub quux
  return "Called " .  __PACKAGE__ . "::quux (@_)."; 
  }
 
-print "module M2 loaded\n";
+print "module M2 loaded\n"  unless $main::quiet;
 1;
 

@@ -1,0 +1,15 @@
+Exporter-VA-Convert.perl : utility program to translate uses of classic Exporter.
+Exporter-VA.pm : the principle file for Expoter::VA.pm.  This is what you need to use it.
+install.perl : simple installer.
+
+Exporter-VA-Convert.perl.sig : digital signature.
+Exporter-VA.pm.sig
+
+test1.perl : automated unit test.
+
+M1.pm : module files for test scripts.
+M2.pm
+M3.pm
+
+MANIFEST.txt : this file.
+README.txt : that file.
