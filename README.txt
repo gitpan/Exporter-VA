@@ -85,3 +85,22 @@ January 12, 2003 -
 
 v1.2.3 released.
 
+January 13, 2003 -
+	implement .allowed_VERSIONS.
+	implement one-shot behavior of verbose importing.
+	implement warning on importing a symbol beginning with an underscore
+
+January 14, 2003 -
+	fix and change to VERSION
+	eliminate (set_)client_desired_version
+
+January xx -
+	eliminate other items from TODO list
+	update POD documentation
+	implement "warnings"
+
+January 22, 2003 -
+	complete implementation if AUTOLOAD and autoload_symbol features
+
+v1.3 released.
+

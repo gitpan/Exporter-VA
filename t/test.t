@@ -3,13 +3,15 @@ use warnings;
 use Getopt::Long;
 use File::Spec;
 
-use constant TEST_COUNT => 28;  # number printed in expect line of test harness output.
+use constant TEST_COUNT => 37;  # number printed in expect line of test harness output.
 our ($quiet, $verbose);
 my $failcount;
 
 
 BEGIN {
-   chdir 't' if -d 't';
+   use File::Basename;
+   unshift @INC, dirname(__FILE__);  # look in same directory for helper modules.
+   $verbose= $ENV{TEST_VERBOSE};
    GetOptions ('quiet' => \$quiet, 'verbose' => \$verbose) or die "bad options\n";
    unless ($verbose) {
       # silence the --verbose and --dump stuff
@@ -25,14 +27,15 @@ sub verify
  my ($code, $answer)= @_;
  my $result= eval ($code);
  if ($@) {
-    print "Error calling { $code }, produces $@";
+    print "not ok - Error calling { $code }, produces $@";
+    ++$failcount;
     }
  else {
     if ($result eq $answer) {
-       print "ok # calling { $code } => $result\n"  unless $quiet;
+       print "ok - calling { $code } => $result\n"  unless $quiet;
        }
     else {
-       print "not ok # calling { $code }, returns \"$result\",  expected \"$answer\"\n";
+       print "not ok - calling { $code }, returns \"$result\",  expected \"$answer\"\n";
        ++$failcount;
        }
     }
@@ -89,6 +92,7 @@ verify "C5::foo (23)", "Called M3::middle_foo (23).";
 
 
 ## Make sure we use a :DEFAULT.
+# >> need to see what version was actually taken.
 package C6;
 use M2;
 sub verify;
@@ -109,17 +113,17 @@ verify "C7::foo (26)", "Called M2::foo (26).";
 verify "C7::baz (27)", "Called M2::baz (27).";
 verify "\$C7::output",  "-pra#ma!";
 
-# check the behavior of normalize_vstring
+## check the behavior of normalize_vstring
 use Exporter::VA 'normalize_vstring';
 sub vv
  {
  my ($x, $answer)= @_;
  my $result= normalize_vstring ($x);
  if ($result eq $answer) {
-    printf "ok # normalizing %vd => %vd\n", $x, $result  unless $quiet;
+    printf "ok - normalizing %vd => %vd\n", $x, $result  unless $quiet;
     }
  else {
-    printf "not ok # normalizing %vd, returns \"%vd\",  expected \"%vd\"\n", $x, $result, $answer;
+    printf "not ok - normalizing %vd, returns \"%vd\",  expected \"%vd\"\n", $x, $result, $answer;
     ++$failcount;
     }
  }
@@ -131,12 +135,92 @@ vv (v1.0.0.0, v1.0);
 vv (2.3, v2.3);
 vv ('2.3.4', v2.3.4);
 
-# check floating-point version specifier on use line
+package main;
+sub match_v
+ {
+ my ($x, $answer)= @_;
+ if ($x eq $answer) {
+    printf "ok\n"  unless $quiet;
+    }
+ else {
+    printf "not ok - got %vd, expected %vd\n", $x, $answer;
+    ++$failcount;
+    }
+ }
+
+## check floating-point version specifier on use line
+# also generates 2 warnings about importing things that begin with underscore, but doesn't automatically verify the presence of the warning.
+# also note that importing of M3 is no longer producing trace output, since --verbose_import is a one-shot.
 package C8;
-use M3 2.4;
-# >> if it worked, it took 2.4 as v2.4, not v50.46.52 or v2.400.
-# >> later, check my client desired version.  How can I do that from "outside"?
-# >> well, have M3 export a function that I can use to ask from the "inside".
+sub match;
+*match_v= \&main::match_v;
+BEGIN { 
+   if ($verbose) {
+      print "This should generate two warnings about importing things beginning with underscores:\n";
+      @C8::args= qw/ :_new_blarg _bar/;
+      }
+   }
+use M3 2.4 @C8::args;
+BEGIN { 
+   print "The two warnings should be before this line.  No longer expecting any warnings.\n" if ($verbose);
+   }
+{
+my $mv= M3->VERSION();
+match_v ($mv, v2.4);  # took M3 as v2.4, not v2.400 or v50.46.52.
+$mv= M3->VERSION(undef,'C3');
+match_v ($mv, v1.3); # check peeking on other package's version of M3.
+   # verifies other-package form of VERSION, and use of .default_VERSION back in C3.
+}
+
+
+
+## check .allowed_VERSIONS
+eval <<'ATTEMPT';
+   package C9;
+   use M2 v1.1;
+ATTEMPT
+
+if ($@) {
+   # as expected, won't let me.
+   print "ok - checked allowed versions.\n"  unless $quiet;
+   if ($verbose) {
+      my $s= $@;
+      $s =~ s/^BEGIN failed.*?\n//m;  # more than I need to know
+      chomp $s;
+      print "As expected, [[ $s ]]\n";
+      }
+   }
+else {
+   print "not ok - version not checked against .allowed_VERSIONS properly.\n";
+   ++$failcount;
+   }
+
+
+## check working of autoload_symbol
+
+package C10;
+use M3 ('get_export_def');
+my $M3_export_def= get_export_def();
+die unless $$M3_export_def{'..home'} eq 'M3';  # make sure my test jig is set up correctly, thus far.
+eval { M3::foo() };
+if ($@ =~ /Undefined subroutine &M3::foo/) {  print "ok\n" unless $quiet }
+else { print "not ok - M3::foo seems to be defined already.\n"; ++$failcount }
+$M3_export_def->autoload_symbol ('foo');  # let the fun begin!
+package main;
+
+verify "package C3; M3::foo (30)", "Called M3::old_foo (30).";
+verify "package C8; M3::foo (31)", "Called M3::new_foo (31).";
+
+
+## check working of implicit AUTOLOAD
+
+verify "M2::thud (32)", "Called M2::baz (32).";
+verify "M2::grunt (33)", "Called M2::baz (33).";
+
+eval { M2::no_such_function (34) };
+if ($@ =~ /no_such_function/) { print "ok\n" unless $quiet }
+else { print "not ok - M2::no_such_function not generating an error.\n";  ++$failcount }
+
 
 ####### summary report ######
 print '-'x40, "\n"  unless $quiet;

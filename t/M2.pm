@@ -15,6 +15,7 @@ use Exporter::VA ':normal',
  '.&begin' => sub { print "called .&begin\n"  unless $main::quiet; },
  '.&end' => sub { print "called .&end\n"  unless $main::quiet; },
  '-pra#ma!' => sub { my ($self, $caller, $version, $symbol, $param_list_tail)= @_;  my $dest= shift @$param_list_tail;  $$dest= $symbol;  return "who knows what evil lurks in the hearts of men?" },
+ '.allowed_VERSIONS' => [ v1.0, "1.2" ],
  } ;
 
 sub foo

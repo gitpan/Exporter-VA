@@ -9,25 +9,31 @@ Exporter::VA - Improved Exporter featuring Versioning and Aliasing.
 package Exporter::VA;
 use strict;
 use warnings;
-use Carp qw/croak confess/;
+use Carp qw/croak carp/;
 use utf8;
-our $VERSION= v1.2.3;  # major.minor.update.docsonly
+our $VERSION= v1.3;  # major.minor.update.docsonly
 *VERBOSE= *STDERR{IO};   # can be redirected
 
 my %EXPORT= (
    '&VERSION' => \&export_VERSION,
    '&import' => \&export_import,
-   '&AUTOLOAD' => \\&AUTOLOAD,
+   '&AUTOLOAD' => \&export_AUTOLOAD,
    '.default_VERSION'=> v0.1,
    ':normal' => [qw/ &VERSION &import &AUTOLOAD/ ],
    '.&begin' => \&begin,
    '&normalize_vstring' => \\&normalize_vstring,
+   '&autoload_symbol' => \\&autoload_symbol,
    );
 
 sub Err
  {
  # improve this to give proper level information to Croak.
  croak @_;
+ }
+
+sub Warn
+ {
+ carp @_;
  }
 
 sub dump
@@ -73,27 +79,42 @@ sub _calling_client()
     }
  }
 
+sub _check_allowed_versions
+ {
+ my ($version, $list)= @_;
+ return unless defined $list;  # if .allowed_VERSIONS is not specified, anything is allowed.
+ foreach (@$list) {
+    return  if $version eq $_;  # normalized earlier.
+    }
+ # compose error message
+ my $vs= join( ', ', map { _format_vstring($_)} (@$list) );
+ Err "(Exporter::VA) you asked for ", _format_vstring($version), ", but the only allowed versions are $vs";
+ }
+
 sub generate_VERSION
  {
  my $export_def= shift;  # might not have been blessed yet.
- my $home= _calling_client();
- return sub {
-    my ($self, $version)= @_;
-    $version= normalize_vstring($version);
-    my $client= _calling_client();
+ return sub {  # this becomes the VERSION function in the exporting module.
+    my ($home, $version, $client)= @_;
+    $client= _calling_client() unless defined $client;  # allow as optional argument
     if (defined $version) {
        # assure correct version / set desired version
+       $version= normalize_vstring($version);
        Err "The version for this module has already been specified for module $client as ", _format_vstring ($export_def->{'..client_default_version'}{$client})
           if exists $export_def->{'..client_default_version'}{$client};
        my $max_version= $export_def->{'..max_VERSION'} || _get_VERSION ($home);  # first time, called before setup.
        Err "$client requested version ", _format_vstring ($version), " but module $home is only version ", _format_vstring ($max_version)
           if $version gt $max_version;
+       _check_allowed_versions ($version, $export_def->{'.allowed_VERSIONS'});
        $export_def->{'..client_default_version'}{$client}= $version;
        }
     else {
        # fetch version
        return $export_def->{'..client_default_version'}{$client}  if exists $export_def->{'..client_default_version'}{$client};
-       return $export_def->{'..max_VERSION'} || _get_VERSION ($home);
+       # never explicitly specified, so use the module's actual current version.
+       $version= $export_def->{'..max_VERSION'} || _get_VERSION ($home);
+       $export_def->{'..client_default_version'}{$client}= $version;  # once I decide, must always use the same result.
+       return $version;
        }
     }
  }
@@ -114,6 +135,16 @@ sub get_import_version
 sub _format_vstring($)
  {
  return sprintf ("v%vd", shift);
+ }
+
+
+sub _normalize_vstring_list
+ {
+ my $list= shift;
+ for (my $loop= 0; $loop < @$list; $loop+=2) {
+    normalize_vstring ($$list[$loop]);
+    }
+ bless $list, "ARRAY-seen";
  }
 
 sub _match_vstring_list
@@ -147,14 +178,8 @@ sub generate_import
     $export_def -> export ($client, $version, \@_);
     $export_def->callback ('.&end', $client, $version, '.&begin', \@_);
     $export_def->_process_worklist();
+    --$$export_def{'.verbose_import'}  if $$export_def{'.verbose_import'};
     }
- }
-
-
-sub set_client_desired_version
- {
- my ($self, $module, $version)= @_;
- $self->{'..client_desired_version'}{$module}= $version;
  }
 
 sub export
@@ -231,7 +256,11 @@ sub resolve
     unless defined $value;  # not listed in export def.
  my $type= ref $value;  # what is it?  Lots of different ways to list it.
  return _resolve_by_name ($item, $$self{'..home'}, $value)  unless $type;  # scalar is a name in the home package.
- return &_resolve_by_versionlist  if $type eq 'ARRAY';
+ return &_resolve_by_versionlist  if $type eq 'ARRAY-seen';
+ if ($type eq 'ARRAY') {
+    _normalize_vstring_list ($value);
+    return &_resolve_by_versionlist;
+    }
  return $value->(@_)  if $type eq 'CODE';
  return _resolve_by_hardlink ($item, $$value);
  Err "(Exporter::VA) Invalid export definition for item $item";
@@ -241,6 +270,8 @@ sub export_one_symbol # or pragma
  {
  my ($self, $module, $version, $item, $param_tail)= @_;
  my $sigil= ($item =~ s /^([\$\@\%\*\&\-\<])//) ? $1 : '&';
+ Warn qq((Exporter::VA) warning: importing symbol "$sigil$item" which begins with an underscore)
+    if substr($item,0,1) eq '_';
  my $X= $self->resolve ($module, $version, "$sigil$item", $param_tail);
  if (defined $X && $sigil ne '-') {  # skip the import if it's callback-only
     my $worklist= $self->worklist();
@@ -272,25 +303,38 @@ sub _process_worklist
 sub export_one_tag
  {
  my ($self, $module, $desired_version, $item, $param_tail)= @_;
+ Warn qq((Exporter::VA) warning: importing tag "$item" which begins with an underscore)
+    if substr($item,1,1) eq '_';
 # my $home= $$self{'..home'};  # package I'm exporting =from=
  RESTART:
  my $list= $$self{$item};
  Err "(Exporter::VA) no such export tag '$item'"  unless defined $list;
- Err "(Exporter::VA) export tag '$item' is not a list ref"  unless ref $list eq "ARRAY";
- return  if @$list == 0;  # empty list is OK.
- if (is_vstring($$list[0])) {
+ my $type= ref $list;
+ if ($type eq 'ARRAY') {
+    # identify it, and change $type.
+    return  if @$list == 0;  # empty list is OK.
+    if (is_vstring($$list[0])) {
+       _normalize_vstring_list ($list);
+       $type= 'ARRAY-seen';
+       }
+    else {
+       $type= 'ARRAY-tags';
+       bless $list, $type;
+       }
+    }
+ if ($type eq 'ARRAY-seen') {
     my ($got_version, $result)= _match_vstring_list ($list, $desired_version);
     print VERBOSE "(Exporter::VA) wanted $item version ", _format_vstring($desired_version), ", choose ", _format_vstring($got_version), "\n"
        if $$self{'.verbose_import'};
     $item= $result;
     goto RESTART;
     }
- else {
+ elsif ($type eq 'ARRAY-tags') {
  my @copy= @$list;
     $self->export ($module, $desired_version, \@copy);
     }
- return undef;
- 
+ ## would add support for other types here, e.g. callbacks.
+ else { Err "(Exporter::VA) export tag '$item' is not a list ref" }
  }
  
 sub callback
@@ -364,7 +408,67 @@ sub _get_VERSION
  return normalize_vstring ($v);
  }
 
+{ # extra scope for variable local to function
+
+my %check_code= (
+  # could point to more detailed checking function, or just 1 for OK/allowed with no additional testing.
+   '.allowed_VERSIONS' => 1,
+   '.&begin' => 1,
+   '.check_user_option' => 1,
+   '.default_VERSION' => 1,
+    '.&end' => 1,
+    '.plain' => 1,
+    '.&unknown_feature' => 1,
+    '.&unknown_import' => 1,
+    '.&unknown_type' => 1,
+    '.verbose_import' => 1,
+    '.warnings' => 1
+    );
  
+ sub _check_warning_option($$$)
+ {
+ my ($self, $item, $value)= @_;
+ if ($item =~ /^\.&?\p{IsUpper}/) {
+   # a user-defined option.
+   $self->check_user_option ($item);
+   }
+ return if $item =~ /^\.\./;  # internal state information
+ # check for known options.
+ my $checker= $check_code{$item};
+ if (!defined $checker)  { Warn qq{(Exporter::VA) unknown option present: "$item"} }
+ elsif (ref $checker) { $checker->($item,$value) }
+ # else it exists but doesn't have special checking code, so no messages.
+ }
+
+} # scope for _check_warning_option
+
+sub _check_warning_tag($$)
+ {
+ my ($item, $value)= @_;
+ }
+
+sub _check_warning_pragma($$)
+ {
+ my ($item, $value)= @_;
+ }
+
+sub _check_warning_identifier($$)
+ {
+ my ($item, $value)= @_;
+ }
+
+sub _check_for_warnings
+ {
+ my $self= shift;
+ while (my($key, $value)= each %$self) {
+    my $firstchar= substr($key,0,1);
+    if ($firstchar eq '.')  { _check_warning_option ($self, $key, $value) }
+    elsif ($firstchar eq ':')  {_check_warning_tag ($key, $value) }
+    elsif ($firstchar eq '-')	{_check_warning_pragma ($key, $value) }
+    else  {_check_warning_identifier ($key, $value) }
+    }
+ }
+
 sub setup
  {
  my ($self, $home)= @_;
@@ -377,7 +481,10 @@ sub setup
  $$self{'..max_VERSION'}= _get_VERSION ($home);
  $self->_expand_plain();
  $self->_populate_defaults();
- # > TODO: check for warnings, if enabled
+ if (exists $$self{'.allowed_VERSIONS'}) {
+    $_= normalize_vstring($_)  foreach (@{$$self{'.allowed_VERSIONS'}});
+    }
+ $self->_check_for_warnings()  if $$self{'.warnings'};
  }
 
 {
@@ -419,22 +526,60 @@ sub export_import
 sub export_VERSION
   # called to export a custom VERSION function to *my* client, when Export::VA is used.
  {
- my ($VA_export_def, $caller, $version, $symbol, $param_list_tail)= @_;
+ # my ($VA_export_def, $caller, $version, $symbol, $param_list_tail)= @_;
+ # the above line documents the parameters, but I don't need any of them so it's commented out.
  return generate_VERSION ($client_export_def);
  }
 
-}
 
-
-## pre-made callbacks
-
-sub export_fail
+sub export_AUTOLOAD
+  # called to export a custom AUTOLOAD function to *my* client, when Export::VA is used.
  {
- my ($self, $caller, $version, $symbol, $param_list_tail)= @_;
- Err "May not import $symbol";  # that's what it would do anyway, if it were not listed.
- # Not terribly useful, but here for com
+ # my ($VA_export_def, $caller, $version, $symbol, $param_list_tail)= @_;
+ # the above line documents the parameters, but I don't need any of them so it's commented out.
+ return _generate_AUTOLOAD ($client_export_def);
  }
 
+ 
+}  # end scope around $client_export_def
+
+sub autoload_symbol
+ {
+ my ($self, $symbol, @extra)= @_;
+ my %memory;
+ my $home= $self->{'..home'};
+ my $thunk= sub {
+    my $retval= eval {
+       my $caller= _calling_client();  # so I don't have to figure it out multiple times
+       my $f= $memory{$caller};
+       unless (defined $f) {
+          $f= $memory{$caller}= $self->resolve ($caller, $home->VERSION(undef,$caller), '&'.$symbol, [@extra]);
+          }
+       goto &$f;
+       };
+    if ($@) {
+       carp "(Exporter::VA) Cannot redirect to versioned function ($@)";
+       }
+    return $retval;
+    };
+ no strict 'refs';
+ *{"${home}::$symbol"}= $thunk; 
+ }
+
+sub _generate_AUTOLOAD
+ {
+ my $client_export_def= shift;
+ return sub {  # the generated AUTOLOAD
+    my $AUTOLOAD= $Exporter::VA::AUTOLOAD;  # save the global in case of recursion.
+    my $func= $AUTOLOAD;
+    print "+++ autoload $func\n";
+    $func =~ s/.*:://;  # not checking the actual module name.  Might be inherited or re-routed or something.  I shouldn't care, right?
+    Err "(Exporter::VA) Generated $client_export_def->{'..home'}::AUTOLOAD can't find export definition for $func."
+       unless exists $client_export_def->{$func} || exists $client_export_def->{'&' . $func};
+    $client_export_def->autoload_symbol ($func);
+    goto &$AUTOLOAD;  # try it again.
+    }
+ }
 
 ## main code.
 {
@@ -1036,7 +1181,8 @@ unknown options.
 
 If you derive from or otherwise extend C<Exporter::VA> and wish to add more options, use
 option names beginning with capital letters (or a C<&> followed by a capital letter).  All others are 
-reserved for future versions of this module.
+reserved for future versions of this module.  (A I<capital> can be any Unicode value with the
+IsUpper property.)
 
 Also, supply a method C<check_user_option> in your derived class or use the C<.check_user_option> option
 to declare your additional options.
@@ -1123,7 +1269,7 @@ ability by calling the method L<autoload_symbol|autoload_symbol>.
 If you don't like the automatically-generated thunk, you can easily create your own using the
 underlying helper functions.  In order to write a function C<foo> that checks the caller's desired
 version and calls the appropreate version, use the methods L<resolve|resolve> 
-and L<client_desired_version|client_desired_version>.
+and L<VERSION|VERSION>.
 
 There is no automatic facility to do this for non-functions.  You are better off using access methods instead
 of direct access to data values.  But, you can accomplish much the same thing by using ties to a variable
@@ -1153,7 +1299,6 @@ do wish to write your own C<import> function, the generated one looks like this:
 	 $export_def->setup ($home);  # happens first time used.
 	 my $module= _calling_client();  # does caller() in a loop 'till out of Exporter::VA.
 	 my $version= $export_def->get_import_version();
-	 $export_def->set_client_desired_version ($module, $version);
 	 $export_def->callback ('.&begin', $module, $version, '.&begin', \@_);
 	 @_ = ':DEFAULT'  if (!@_ && defined $export_def->{':DEFAULT'});
 	 $export_def ->export ($module, $version, \@_);
@@ -1210,11 +1355,19 @@ a pragmatic import to paramiterize the generation of an imported function.
 
 =head3 autoload_symbol
 
-	autoload_symbol ($blessed_export_def, $module, $symbol)
+	autoload_symbol ($blessed_export_def, $symbol, @extras)
 
 Call this to implement C<AUTOLOAD>, or pre-generate the thunks.  Calling this will generate
-a sub named C<$symbol> into C<$module> that will redirect to the proper function
-based on its immediate caller at run-time.
+a sub named C<$symbol> into the module where the C<$blessed_export_def> is from
+that will redirect to the proper function based on its immediate caller at run-time.
+
+Note that C<$symbol> must name a function listed in the C<%EXPORT> definition, and
+you must <I>leave off</I> the '&' sigil.
+
+Any extra arguments are passed as the C<$param_list_tail> if a callback is involved.  This
+lets you pass parameters if need be, as would normally be found following the symbol name
+in the import list.  However, it doesn't seem like a good idea to have ordinarily-named
+import symbols taking parameters (they should begin with a dash, for clarity).
 
 =head3 check_user_option
 
@@ -1229,12 +1382,6 @@ and it will be incorporated into the warning message.
 
 The built-in base implementation will call the code in C<L<.check_user_option>> if
 present, or otherwise report a warning on all parameters it checks.
-
-=head3 client_desired_version
-
-	$vstring= client_desired_version ($blessed_export_def, $caller)
-
-This returns a v-string stating which version was C<use>d by the specified C<$caller> package.
 
 =head3 dump
 
@@ -1274,12 +1421,6 @@ This will look for C<$item> based on the C<%EXPORT> definition, and return a ref
 thing to export under that name based on the specified C<$version> and possibly the C<$caller>.  
 The C<$caller> and C<$import_param_tail> are not needed directly, but will be passed to callbacks.
 
-=head3 set_client_desired_version ($blessed_export_def, $caller, $version)
-
-This is the inverse of C<client_desired_version>.  You probably don't need to call this directly, since it
-is handled by the module's C<VERSION> function and triggered through the C<use> statement.  You would
-call this from C<VERSION> if implementing it directly.
-
 =head3 worklist
 
 	$hashref= worklist ($blessed_export_def)
@@ -1307,11 +1448,93 @@ messages.  It is initially aliased to C<STDERR>, but may be redirected using glo
 
 =over 4
 
-=item import, AUTOLOAD, VERSION
+=item AUTOLOAD
+
+=item import
 
 =item normalize_vstring
 
->>> Put details here.
+This takes the argument which represents a version number, and returns a normalized form of it.
+The normalized form allows for version comparisons using string relational operators, including
+C<eq>.  That is, various ways of specifying the same version identifier are all converted to the
+same canonocal form.  For example, C<v1.0>, C<"1.0.0.0">, C<1.0> all refer to the same
+version and will return the same normalized string.
+
+The following forms are accepted:
+
+A string that is an ASCII representation of a dotted number is converted to a v-string.  If you
+have a v-string that contains only values that happen to be ASCII digits and dots, such as
+C<v51.46.50>, then it will think it's the ASCII string for C<"3.2"> and convert it to C<v3.2>.  To
+disambiguate, add an extra C<.0> on the end, which does not change the meaning thanks to
+normalization.  That is, C<v51.46.50.0> means the same thing as C<v51.46.50>.  Specifically
+(and this is subject to change), any string that contains characters in the range of C<\x0> through
+C<\x1f>, which are non-printable control codes, is considered to be a v-string.  A string that
+contains no characters in this range is assumed to be a string representation of some kind.  Since
+most version numbers are small, this is a natural way to distinguish them.
+
+Using a float for a vstring 2.3 gives v2.3, not v2.300.  That is, it doesn't follow the 3-digit rule, but 
+simple stringification.  Distinghishing a float literal from a string literal would require a module
+not supplied with Perl 5.6 (but is available in 5.8).  Few people seem to use the 3-digit rule anyway.
+It's best to just remember to always use the v, or use quotes.  In Perl 5.8 this may generate a warning
+in the future.
+
+After converting the input representation to a v-string, it is put into canonocal form to properly
+allow C<eq> comparisons.  Specifically, trailing zeros are removed, except it will always have
+at least two digits.  So C<v2> and C<v2.0.0.0.0.0.0> both become C<v2.0>.
+
+This function is used by the module to allow version representations in your chosen format.  It
+may be exported, so you can easily use this public function yourself, too.
+
+=item VERSION
+
+	$v= Module->VERSION;  # get version info
+	Module->VERSION ($v);  # set/verify version info
+	Module->VERSION ($v, $caller);  # set/verify version info for $caller
+	$v= Module->VERSION (undef, $caller);  # get version info for $caller
+
+The C<VERSION> function has a pre-defined meaning to Perl.  When a version number "indirect argument"
+parameter is used, it is called as an argument to the Module's C<VERSION> function.  That function is intended
+to die if the version is unsuitable.
+
+Instead of simply checking that the supplied version is <= the Module's C<$VERSION>, this implementation
+of C<VERSION> will note the version asked for by the caller.  This information is the basis for all features
+that make use of knowing what version a module's client is expecting, such as to present different
+import lists or enable backward-compatible behavior.
+
+Besides noting the version, C<VERSION> still verifies it.  The desired version is still checked against the
+upper-limit of the Module's C<$VERSION>, and the C<.allowed_VERSIONS> setting if present.
+
+Unlike the supplied C<UNIVERSAL::VERSION>, this one can handle any supported format for the value of
+C<$VERSION> (see C<L<normalize_vstring>>).
+
+If called with no arguments, <VERSION> returns the Module's version.  It does this with caller awareness,
+as different calling modules may have specified different versions of the use'd Module.  If you ask for
+the version but never specified a desired version, it takes the module's C<$VERSION> (or the
+C<.default_VERSION> setting), acting as though that was the version you asked for all along.
+
+Note that it always returns a normalized v-string, regardless of what format you may have used
+to set or specify the version.
+
+So, this function is used internally by the semantics of use (or require) to set the per-module version,
+and is also to obtain the per-module version for any (and all) need for this information.  If a function
+within the module wants to know if it should emulate an old version or not, it can call its own VERSION
+function and find out what the caller (first caller up the chain that's outside of this Module) is expecting.
+
+As the sole interface for this information, the C<VERSION> function has one addional bit of flexibility.
+You can call it with a 3rd argument to specify a client module, rather than using the caller.  So,
+
+	package B;
+	use Module v2.7;
+
+	sub foo
+	{
+	my $B_version= Module->VERSION();  # gets v2.7
+	my $Henry_version= Module->VERSION (undef, 'Henry');  # find out what Henry's doing.
+	}
+
+Note that you specify C<undef> as the version argument so that you can supply the 
+optional extra argument and still use the "get" form of the function.  Presence of the 
+version argument triggers the "set" form.
 
 =back
 
@@ -1411,28 +1634,26 @@ Anyone who explores the matter or stresses the module in this regard, please let
 
 =head1 Caveats and known issues
 
-Using a float for a vstring 2.3 gives v2.3, not v2.300.  That is, it doesn't follow the 3-digit rule, but 
-simple stringification.  Distinghishing a float literal from a string literal would require a module
-not supplied with Perl 5.6 (but is available in 5.8).  Few people seem to use the 3-digit rule anyway.
-It's best to just remember to always use the v, or use quotes.  In Perl 5.8 this may generate a warning
-in the future.
-
-Warning on directly importing something that begins with an underscore - probably not
-implemented.  Not unit testing the presence of documented warnings, anyway.
-
-.allowed_VERSIONS option not implemented.
-
-.check_user_option option not implemented
-
-.verbose_import not yet "one-shot".
-
-.warings not implemented.
-
-AUTOLOAD thunks and autoload_import for versioned imports not implemented yet.
-
-client_desired_version() public method not implemented yet.
+=head2 not implemented
 
 -derived pragma not implemented yet.
+
+=head2 not tested
+
+Not in unit test: check_user_option() semantics.
+
+Not in unit test: warnings if typo in export definition.
+
+Not in unit test: extra arguments to C<autoload_symbol> passed to callback in C<%EXPORT> definition.
+Don't do that anyway!
+
+=head1 Ideas for Future
+
+Allow tags to be callbacks.  That could support a dynamic :all tag, as well as dynamic lists in general.
+You can manage it now with some effort... a pragmatic import calls export() itself to export a whole
+list of things, and if you really want the tag syntax, define a tag that expands to that one pragma.
+
+Allow tag's definition to contain other tags, not just symbols.
 
 =head1 COPYRIGHT
 
