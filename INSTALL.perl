@@ -20,7 +20,7 @@ my $dest= File::Spec->catfile ($install_location, 'VA.pm');
 
 # where am I running FROM?
 my ($volume,$directories,$file) = File::Spec->splitpath($0);
-my $source= File::Spec->catpath ($volume, $directories, 'Exporter-VA.pm');
+my $source= File::Spec->catpath ($volume, $directories, 'VA.pm');
 
 # OK, do what I came here for.
 # >> could check versions here.
@@ -50,14 +50,52 @@ else {
       unlink $dest;
       }
    }
+update_TOC();  # if on ActiveState Perl.
 
 ### end of main code.
 
 sub test_module
  {
- my $testprog= "test1.perl";
+ my $testprog= "test.t";
  print "Testing the module...\n";
+ chdir 't';  # run from that directory
  my $retcode= system ($^X, $testprog, "--quiet");
  return $retcode == 0;
  }
+
+sub update_TOC
+ {
+ eval "use ActivePerl::DocTools; use Pod::Html;";
+ return if $@;  # stop trying with no visible error if modules are not present.
+ # This is for ActiveState Perl.  Attempting to load the module was a test to see if that's what I'm running on.
+ if (convertPod2html ($dest)) {
+    ActivePerl::DocTools::WriteTOC();
+    print "Updated ActiveState documentation.\n";
+    }
+ }
+
+sub convertPod2html
+ {
+ # based on the code found at < http://www.perlmonks.org/index.pl?node_id=72809 >
+ (my $podfile = shift) =~ s#\\#/#g;
+ (my $htmlroot = $Config{installhtmldir}) =~ s#\\#/#g; 
+ (my $podroot  = $Config{installprefix}) =~ s#\\#/#g; 
+ my ($path,$name) = ($podfile =~ m!$podroot/(.*)/(\w+)\.p(od|l|m|erl)$!i);
+ die "Could not update document table of contents because \"$dest\" is not under the tree of \"$podroot\"\n"
+    unless defined $name;
+ my $outfile = "$htmlroot/$path/$name.html";
+ return 0  if (-e $outfile && -M $podfile > -M $outfile); # redundant re-install; don't bother updating.
+ (my $stylesheetpath = "$path") =~ s#\w+(/?)#..$1#g;
+ mkpath("$htmlroot/$path"); 
+ chdir File::Spec->tmpdir();
+ pod2html(    "--infile=$podfile", 
+     "--outfile=$outfile", 
+     "--header", 
+     "--podroot=$podroot", 
+     "--podpath=site/lib:lib", 
+     "--htmlroot=$htmlroot",
+     "--css=$stylesheetpath/Active.css", 
+   );
+return 1;
+}
 

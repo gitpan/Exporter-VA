@@ -3,17 +3,21 @@ use warnings;
 use Getopt::Long;
 use File::Spec;
 
-our $quiet;
+use constant TEST_COUNT => 28;  # number printed in expect line of test harness output.
+our ($quiet, $verbose);
 my $failcount;
 
+
 BEGIN {
-   GetOptions ('quiet' => \$quiet) or die "bad options\n";
-   if ($quiet) {
-      # also silence the --verbose and --dump stuff
+   chdir 't' if -d 't';
+   GetOptions ('quiet' => \$quiet, 'verbose' => \$verbose) or die "bad options\n";
+   unless ($verbose) {
+      # silence the --verbose and --dump stuff
       open (my $f, '>', File::Spec->devnull());
       require Exporter::VA;
       *Exporter::VA::VERBOSE= $f;
       }
+   print "1..", TEST_COUNT, "\n" unless ($quiet);  # format used by Test::Harness.
    }
 
 sub verify
@@ -25,10 +29,10 @@ sub verify
     }
  else {
     if ($result eq $answer) {
-       print "OK calling { $code } => $result\n"  unless $quiet;
+       print "ok # calling { $code } => $result\n"  unless $quiet;
        }
     else {
-       print "WRONG calling { $code }, returns \"$result\",  expected \"$answer\"\n";
+       print "not ok # calling { $code }, returns \"$result\",  expected \"$answer\"\n";
        ++$failcount;
        }
     }
@@ -105,6 +109,34 @@ verify "C7::foo (26)", "Called M2::foo (26).";
 verify "C7::baz (27)", "Called M2::baz (27).";
 verify "\$C7::output",  "-pra#ma!";
 
+# check the behavior of normalize_vstring
+use Exporter::VA 'normalize_vstring';
+sub vv
+ {
+ my ($x, $answer)= @_;
+ my $result= normalize_vstring ($x);
+ if ($result eq $answer) {
+    printf "ok # normalizing %vd => %vd\n", $x, $result  unless $quiet;
+    }
+ else {
+    printf "not ok # normalizing %vd, returns \"%vd\",  expected \"%vd\"\n", $x, $result, $answer;
+    ++$failcount;
+    }
+ }
+ 
+vv (v1.2.3, v1.2.3);
+vv ('', v0);
+vv (v3.2.1.0, v3.2.1);
+vv (v1.0.0.0, v1.0);
+vv (2.3, v2.3);
+vv ('2.3.4', v2.3.4);
+
+# check floating-point version specifier on use line
+package C8;
+use M3 2.4;
+# >> if it worked, it took 2.4 as v2.4, not v50.46.52 or v2.400.
+# >> later, check my client desired version.  How can I do that from "outside"?
+# >> well, have M3 export a function that I can use to ask from the "inside".
 
 ####### summary report ######
 print '-'x40, "\n"  unless $quiet;

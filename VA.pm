@@ -10,7 +10,8 @@ package Exporter::VA;
 use strict;
 use warnings;
 use Carp qw/croak confess/;
-our $VERSION= v1.2.2;  # major.minor.update.docsonly
+use utf8;
+our $VERSION= v1.2.3;  # major.minor.update.docsonly
 *VERBOSE= *STDERR{IO};   # can be redirected
 
 my %EXPORT= (
@@ -20,6 +21,7 @@ my %EXPORT= (
    '.default_VERSION'=> v0.1,
    ':normal' => [qw/ &VERSION &import &AUTOLOAD/ ],
    '.&begin' => \&begin,
+   '&normalize_vstring' => \\&normalize_vstring,
    );
 
 sub Err
@@ -51,9 +53,12 @@ sub is_vstring($)
 sub normalize_vstring ($)
  {
  my $v= shift;
- # >> will handle different (apparent) forms, and return a canonocal v-string.
  # for now, doesn't do much.
  return v0 if length ($v) eq 0;
+ $v= pack ("U*", split (/\./,$v))
+    unless is_vstring ($v);
+ # remove trailing redundant zeros (but keep it at least 2 digits, so v1.0 is right, v1.0.0.0 is truncated)
+ $v =~ s/(?<=..)\0+$//;
  return $v;
  }
 
@@ -74,6 +79,7 @@ sub generate_VERSION
  my $home= _calling_client();
  return sub {
     my ($self, $version)= @_;
+    $version= normalize_vstring($version);
     my $client= _calling_client();
     if (defined $version) {
        # assure correct version / set desired version
@@ -1299,7 +1305,15 @@ messages.  It is initially aliased to C<STDERR>, but may be redirected using glo
 
 =head3 functions
 
-import, AUTOLOAD, VERSION
+=over 4
+
+=item import, AUTOLOAD, VERSION
+
+=item normalize_vstring
+
+>>> Put details here.
+
+=back
 
 =head3 tags
 
@@ -1397,11 +1411,11 @@ Anyone who explores the matter or stresses the module in this regard, please let
 
 =head1 Caveats and known issues
 
-The version-number handling is still primitive.  You must use a v-string (not a float) for the
-indirect object to C<use> (just don't leave out the sometimes-optional leading C<v>), and 
-the C<$VERSION> package global must be a v-string, not an ASCII-string.  That is, C<our $VERSION= v1.0.2;> works,
-C<our $VERSION= "1.0.2";> does not (yet).  Versions are compared without normalizing, so
-v1.2.3.0 will compare greater than (not equal to) v.1.2.3.  This will be fixed soon.
+Using a float for a vstring 2.3 gives v2.3, not v2.300.  That is, it doesn't follow the 3-digit rule, but 
+simple stringification.  Distinghishing a float literal from a string literal would require a module
+not supplied with Perl 5.6 (but is available in 5.8).  Few people seem to use the 3-digit rule anyway.
+It's best to just remember to always use the v, or use quotes.  In Perl 5.8 this may generate a warning
+in the future.
 
 Warning on directly importing something that begins with an underscore - probably not
 implemented.  Not unit testing the presence of documented warnings, anyway.
@@ -1420,33 +1434,13 @@ client_desired_version() public method not implemented yet.
 
 -derived pragma not implemented yet.
 
+=head1 COPYRIGHT
+
+ Copyright 2003 by John M. Dlugosz. All rights reserved.
+ This program is free software; you can redistribute it and/or
+ modify it under the same terms as Perl itself.
+
 =head1 HISTORY
 
-October 2002 - preliminary documentation and design reviews
-
-December 3, 2002 - Basic export works (see test1.perl).  Made available for peer review of code.
-
-v1.0 on December 10, 2002 -
-Stable and fairly clean, with unit tests.  Supports everything except version lists.
-
-December 19, 2002 - v1.1 - redid the way VERSION works.
-Bug fix: the tag list definition was being eaten.  Exporting the same module again would see it empty!
-version-list in export def (but not in tag list) works.
-
-December 22, 2002 - work on VERSION function and docs, version checking, version support routines.
-Implement version-list in tag list.
-
-December 23, 2002 - review docs, produce 'issues' list, make install.perl.
-
-v1.2 released.  Supports everything except non-imported alias suite of features.
-
-January 6, 2003 - Exporter-VA-Convert.perl utility, release procedure.
-
-January 9, 2003 - 
-	if .default_VERSION left out, assumes current $VERSION.
-	installer runs unit tests, rolls back on failure.
-	test1.perl has --quiet mode.
-	put in more unit testing code.
-
-v1.2.2 released.
+See the README.txt file for detailed history.
 
