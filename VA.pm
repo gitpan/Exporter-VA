@@ -11,7 +11,7 @@ use strict;
 use warnings;
 use Carp qw/croak carp/;
 use utf8;
-our $VERSION= v1.3;  # major.minor.update.docsonly
+our $VERSION= v1.3.0.1;  # major.minor.update.docsonly
 *VERBOSE= *STDERR{IO};   # can be redirected
 
 my %EXPORT= (
@@ -572,7 +572,6 @@ sub _generate_AUTOLOAD
  return sub {  # the generated AUTOLOAD
     my $AUTOLOAD= $Exporter::VA::AUTOLOAD;  # save the global in case of recursion.
     my $func= $AUTOLOAD;
-    print "+++ autoload $func\n";
     $func =~ s/.*:://;  # not checking the actual module name.  Might be inherited or re-routed or something.  I shouldn't care, right?
     Err "(Exporter::VA) Generated $client_export_def->{'..home'}::AUTOLOAD can't find export definition for $func."
        unless exists $client_export_def->{$func} || exists $client_export_def->{'&' . $func};
@@ -1600,16 +1599,15 @@ See L<.verbose|the .verbose setting>.  This increments the C<.verbose> value.
 
 =head2 Platforms
 
-Developed originally on Perl 5.6.1, ActiveState build 630 for Windows.  It uses only pure Perl and no
-non-basic modules, so it ought to work on any platform.  It uses nothing that should be changed in
-Perl 5.8.
+It uses only pure Perl and no non-basic modules, so it ought to work on any platform.  
 
 I'd appreciate it if anyone using a different configuration (not listed below) let me know that the test1.perl
 script works properly and that there are no issues.  If there are issues, I'm even more interested!
 
 	Tested on:
-	Exporter::VA version 1.1 on Perl 5.6.1 (AS 630, Windows 2000)
-	... others wanted!
+	Exporter::VA version 1.3.0.1 on Perl 5.6.1 (AS 633, Windows 2000)
+	Exporter::VA version 1.3.0.1 on Perl 5.8.0 (AS 804, Windows 2000)
+	... others wanted!  CPAN testers haven't reported anything since I made the module compatible with CPANPLUS.
 
 =head2 Unicode / utf8
 

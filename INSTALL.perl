@@ -32,7 +32,8 @@ if ($have_old) {
    move ($dest, $tempfile)  or die qq(Could not move "$dest" to "$tempfile");
    }
 copy ($source, $dest)  or die qq(Could not copy "$source" to "$dest"\n);
-# test, then clean up.
+print qq(Copied "$source" to "$dest"\n);
+# test, then clean up
 if (test_module()) {
    # all went well so get rid of the backup.
    print "OK.\n";
@@ -94,7 +95,7 @@ sub convertPod2html
      "--podroot=$podroot", 
      "--podpath=site/lib:lib", 
      "--htmlroot=$htmlroot",
-     "--css=$stylesheetpath/Active.css", 
+     "--css=$stylesheetpath/Active.css"
    );
 return 1;
 }

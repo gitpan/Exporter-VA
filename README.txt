@@ -104,3 +104,6 @@ January 22, 2003 -
 
 v1.3 released.
 
+v1.3.0.1 : validated on Perl 5.8, removed stray debug print.
+
+
