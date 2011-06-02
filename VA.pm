@@ -11,7 +11,7 @@ use strict;
 use warnings;
 use Carp qw/croak carp/;
 use utf8;
-our $VERSION= v1.3.0.1;  # major.minor.update.docsonly
+our $VERSION= v1.3.1.0;  # major.minor.update.docsonly
 *VERBOSE= *STDERR{IO};   # can be redirected
 
 my %EXPORT= (
@@ -549,7 +549,7 @@ sub autoload_symbol
  my %memory;
  my $home= $self->{'..home'};
  my $thunk= sub {
-    my $retval= eval {
+    my $retval= do {
        my $caller= _calling_client();  # so I don't have to figure it out multiple times
        my $f= $memory{$caller};
        unless (defined $f) {
@@ -557,9 +557,9 @@ sub autoload_symbol
           }
        goto &$f;
        };
-    if ($@) {
-       carp "(Exporter::VA) Cannot redirect to versioned function ($@)";
-       }
+#    if ($@) {
+#       carp "(Exporter::VA) Cannot redirect to versioned function ($@)";
+#       }
     return $retval;
     };
  no strict 'refs';
@@ -1361,7 +1361,7 @@ a sub named C<$symbol> into the module where the C<$blessed_export_def> is from
 that will redirect to the proper function based on its immediate caller at run-time.
 
 Note that C<$symbol> must name a function listed in the C<%EXPORT> definition, and
-you must <I>leave off</I> the '&' sigil.
+you must I<leave off> the '&' sigil.
 
 Any extra arguments are passed as the C<$param_list_tail> if a callback is involved.  This
 lets you pass parameters if need be, as would normally be found following the symbol name

@@ -106,4 +106,7 @@ v1.3 released.
 
 v1.3.0.1 : validated on Perl 5.8, removed stray debug print.
 
+May 17, 2011 -
+v.1.3.1.0: remove eval "try" from thunk, as it causes problems with newer versions of Perl.
+
 
